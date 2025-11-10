@@ -184,7 +184,7 @@ giscus:
   # 可选值：1 | 0
   emit_metadata: 0
   # 可选值：light | dark | preferred_color_scheme
-  theme: preferred_color_scheme
+  theme: light
   # 可选值：en | zh-CN
   lang: zh-CN
   # 加载评论的方式：lazy | eager
