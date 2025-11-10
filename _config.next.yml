@@ -1,0 +1,334 @@
+# ============================================================
+# NexT Theme Configuration
+# ============================================================
+
+# ============================================================
+# Scheme Settings
+# ============================================================
+# 主题样式，可选：Muse | Mist | Pisces | Gemini
+scheme: Gemini
+
+# ============================================================
+# Menu Settings
+# ============================================================
+menu:
+  home: / || fa fa-home
+  archives: /archives/ || fa fa-archive
+  tags: /tags/ || fa fa-tags
+  categories: /categories/ || fa fa-th
+  about: /about/ || fa fa-user
+
+# ============================================================
+# Sidebar Settings
+# ============================================================
+sidebar:
+  # 侧边栏位置：left | right
+  position: left
+  # 侧边栏显示时机：post | always | hide | remove
+  display: post
+  padding: 18
+  offset: 12
+
+# 头像设置
+avatar:
+  # 头像图片URL，可以是本地路径或网络链接
+  url: /images/avatar.png
+  # 圆形头像
+  rounded: true
+  # 旋转动画
+  rotated: false
+
+# ============================================================
+# Social Links
+# ============================================================
+social:
+  GitHub: https://github.com/NianJi || fab fa-github
+  # E-Mail: mailto:your-email@example.com || fa fa-envelope
+  # 可以添加更多社交链接
+
+social_icons:
+  enable: true
+  icons_only: false
+  transition: false
+
+# ============================================================
+# Footer Settings
+# ============================================================
+footer:
+  # 建站时间
+  since: 2025
+  # 图标
+  icon:
+    name: fa fa-heart
+    animated: true
+    color: "#ff0000"
+  # 版权信息
+  copyright: 念纪
+  powered: true
+
+# ============================================================
+# Code Block Settings
+# ============================================================
+codeblock:
+  # 代码高亮主题
+  theme:
+    light: default
+    dark: stackoverflow-dark
+  # 复制按钮
+  copy_button:
+    enable: true
+    show_result: true
+    style: default
+  # 代码块折叠
+  fold:
+    enable: false
+    height: 500
+
+# ============================================================
+# Back to Top
+# ============================================================
+back2top:
+  enable: true
+  # 显示阅读百分比
+  sidebar: true
+  # 显示滚动百分比
+  scrollpercent: true
+
+# ============================================================
+# Reading Progress
+# ============================================================
+reading_progress:
+  enable: true
+  # 在顶部显示阅读进度条
+  position: top
+  color: "#37c6c0"
+  height: 3px
+
+# ============================================================
+# Bookmark
+# ============================================================
+bookmark:
+  enable: true
+  color: "#222"
+  save: auto
+
+# ============================================================
+# GitHub Banner
+# ============================================================
+github_banner:
+  enable: true
+  permalink: https://github.com/NianJi
+  title: Follow me on GitHub
+
+# ============================================================
+# Font Settings
+# ============================================================
+font:
+  enable: true
+  # 字体来源
+  host: //fonts.googleapis.com
+  # 全局字体
+  global:
+    external: true
+    family: Lato
+    size: 1
+  # 标题字体
+  headings:
+    external: true
+    family: Lato
+    size: 1
+  # 文章字体
+  posts:
+    external: true
+    family: Lato
+  # 代码字体
+  codes:
+    external: true
+    family: Roboto Mono
+
+# ============================================================
+# SEO Settings
+# ============================================================
+# 优化索引
+index_with_subtitle: true
+
+# 自动节选
+auto_excerpt:
+  enable: true
+  length: 150
+
+# ============================================================
+# Comments Settings (Giscus)
+# ============================================================
+# 暂时禁用，待配置 Giscus
+comments:
+  active: giscus
+  # 是否在首页显示评论
+  nav:
+    home: true
+    post: true
+    page: true
+
+# Giscus 评论系统配置
+# 访问 https://giscus.app/zh-CN 获取配置参数
+giscus:
+  enable: true
+  repo: NianJi/nianji.github.io
+  repo_id: # 需要在 https://giscus.app 获取
+  category: Announcements
+  category_id: # 需要在 https://giscus.app 获取
+  # 可选值：pathname | url | title | og:title
+  mapping: pathname
+  # 可选值：1 | 0
+  reactions_enabled: 1
+  # 可选值：1 | 0
+  emit_metadata: 0
+  # 可选值：light | dark | preferred_color_scheme
+  theme: preferred_color_scheme
+  # 可选值：en | zh-CN
+  lang: zh-CN
+  # 加载评论的方式：lazy | eager
+  loading: lazy
+  # 输入框位置：top | bottom
+  input_position: bottom
+  # 跨域设置
+  crossorigin: anonymous
+
+# ============================================================
+# Post Meta Display Settings
+# ============================================================
+post_meta:
+  # 发布日期
+  created_at: true
+  # 更新日期
+  updated_at:
+    enable: true
+    another_day: true
+  # 分类
+  categories: true
+
+# ============================================================
+# Post Widgets in Sidebar
+# ============================================================
+post_widgets:
+  enable: true
+  icons: true
+  transition: false
+
+# ============================================================
+# TOC (Table of Contents)
+# ============================================================
+toc:
+  enable: true
+  # 显示序号
+  number: true
+  # 自动展开所有层级
+  expand_all: false
+  # 最大展开深度
+  max_depth: 6
+
+# ============================================================
+# Related Posts
+# ============================================================
+related_posts:
+  enable: false
+
+# ============================================================
+# Math Equations
+# ============================================================
+# 数学公式支持（MathJax）
+math:
+  # 默认禁用，需要时在文章 front-matter 中设置 mathjax: true
+  per_page: false
+  # mathjax | katex
+  engine: mathjax
+
+# ============================================================
+# Mermaid Diagrams
+# ============================================================
+# 流程图支持
+mermaid:
+  enable: true
+  # 主题：default | dark | forest | neutral
+  theme:
+    light: default
+    dark: dark
+
+# ============================================================
+# Motion Settings
+# ============================================================
+motion:
+  enable: true
+  async: false
+  transition:
+    menu_item: fadeInDown
+    post_block: fadeIn
+    post_header: fadeInDown
+    post_body: fadeInDown
+    coll_header: fadeInLeft
+    sidebar: fadeInUp
+
+# ============================================================
+# Preconnect
+# ============================================================
+preconnect: true
+
+# ============================================================
+# Disable Baidu Transformation
+# ============================================================
+disable_baidu_transformation: true
+
+# ============================================================
+# Canvas Ribbon
+# ============================================================
+# 背景彩带效果
+canvas_ribbon:
+  enable: false
+
+# ============================================================
+# Pjax (局部刷新)
+# ============================================================
+pjax: false
+
+# ============================================================
+# FancyBox (图片灯箱)
+# ============================================================
+fancybox: true
+
+# ============================================================
+# Lazyload (图片懒加载)
+# ============================================================
+lazyload: true
+
+# ============================================================
+# Pangu (中英文自动添加空格)
+# ============================================================
+pangu: true
+
+# ============================================================
+# Quicklink (预加载链接)
+# ============================================================
+quicklink:
+  enable: true
+  home: true
+  archive: true
+  delay: true
+  timeout: 3000
+  priority: true
+
+# ============================================================
+# Algolia Search (可选)
+# ============================================================
+algolia_search:
+  enable: false
+
+# ============================================================
+# Local Search (本地搜索)
+# ============================================================
+local_search:
+  enable: true
+  trigger: auto
+  top_n_per_article: 1
+  unescape: false
+  preload: false
+
