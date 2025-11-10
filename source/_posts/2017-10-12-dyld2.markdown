@@ -1,0 +1,244 @@
+---
+layout: post
+title: "dyld之二:  动态链接过程"
+date: 2017-10-12 16:16:36 +0800
+comments: true
+categories: dyld
+---
+
+动态链接过程是在二进制加载进来之后，main之前的过程。这一过程就是让二进制变为可正常执行状态的过程。   本文从会讲下面几个主要概念： 
+
+- rebase
+- bind
+- 动态链接过程
+- 符号反向依赖
+
+<!-- more -->
+## rebase
+
+rebase就是指针修正的过程。
+
+一个mach-o的二进制文件中，包含了**text**段和**data**段。而**data**段中的数据也会存在**引用**关系。 我们知道在代码中，我们可以用**指针**来引用，那么在一个文件中怎么代表引用呢，那就是**偏移**(相对于text段开始的偏移)。 而当二进制加载到内存中的时候，起始地址就是申请的内存的起始地址（slide)，不会是0，那么如何再能够找到这些引用的正确内存位置呢？  把**偏移**加上(slide)就好了。 这个过程就是rebase的过程。
+
+下面用个简单的图来说明下原理。
+
+![1.png](/images/dyld2-2/1.png =600x600)
+
+
+## bind
+
+bind就是符号绑定的过程。
+
+为什么要bind?  因为符号在不同的库里面。
+
+举个简单的例子，我们代码里面调用了 `NSClassFromString`. 但是`NSClassFromString`的代码和符号都是在 `Foundation.framework` 这个动态库里面。而在程序未加载之前，我们的代码是不知道`NSLog`在哪里的，于是编译器就编译了一个 **stub** 来调用 `NSClassFromString`:
+
+![2.png](/images/dyld2-2/2.png)
+
+可以看到，我们的代码里面直接从 pc + 0x3701c的地方取出来一个值，然后直接br， 也就是认为这个值就是 `NSClassFromString`的真实地址了。我们再看看这个位置的值是啥：
+
+![3.png](/images/dyld2-2/3.png)
+
+也就是说，这块地址的8个字节会在**bind**之后存入的就是 `NSClassFromString`的代码地址， 那么就实现了真正调用 `NSClassFromString`的过程。
+
+上面我们知道了为啥要**bind**. 那是如何bind的呢？ bind又分为哪些呢？
+
+### 怎么bind
+
+首先 mach-o 的 LoadCommand里面的会有一个cmd来描述 dynamic loader info:
+
+![4.png](/images/dyld2-2/4.png)
+
+可以看到，这里面记录了二进制data段里面哪些是 rebase信息，哪些是binding信息。
+
+![5.png](/images/dyld2-2/5.png)
+
+可以看到binding info的数据结构，bind的过程根据不同的opcode解析出不同的信息，在opcode为`BIND_OPCODE_DO_BIND`的时候，会执行`bindLocation`来进行bind.
+
+截取了 bindLocation 的代码：
+```c
+// do actual update
+uintptr_t* locationToFix = (uintptr_t*)location;
+uint32_t* loc32;
+uintptr_t newValue = value+addend;
+uint32_t value32;
+switch (type) {
+    case BIND_TYPE_POINTER:
+        // test first so we don't needless dirty pages
+        if ( *locationToFix != newValue )
+            *locationToFix = newValue;
+        break;
+    case BIND_TYPE_TEXT_ABSOLUTE32:
+        loc32 = (uint32_t*)locationToFix;
+        value32 = (uint32_t)newValue;
+        if ( *loc32 != value32 )
+            *loc32 = value32;
+        break;
+    case BIND_TYPE_TEXT_PCREL32:
+        loc32 = (uint32_t*)locationToFix;
+        value32 = (uint32_t)(newValue - (((uintptr_t)locationToFix) + 4));
+        if ( *loc32 != value32 )
+            *loc32 = value32;
+        break;
+    default:
+        dyld::throwf("bad bind type %d", type);
+}
+```
+
+可以看出， bind过程也不是单纯的就是把符号地址填过来就好了， 还有type和addend的逻辑。不过一般不多见，大部分都是`BIND_TYPE_POINTER`. 
+
+addend 一般用于要bind某个数组中的某个子元素时，记录这个子元素在数组的偏移。
+
+### Lazy Bind
+
+延迟加载是为了启动速度。上面看到bind的过程，发现bind的过程需要查到对应的符号再进行bind. 如果在启动的时候，所有的符号都立即bind成功，那么势必拖慢启动速度。
+
+其实很多符号都是LazyBind的。就是第一次调用到才会真正的bind. 
+
+其实刚才截图的 `imp___la_symbol_ptr__objc_getClass` 就是一个 LazyBind 的符号。 图中的 0x10d6e8 指向了 `stub_helper` 这个section中的代码。
+
+![6.png](/images/dyld2-2/6.png)
+
+如上图中
+
+- 先取了 `0x10d6f0` 的 4个字节数据存入 w16.  这个数据其实是 lazy bind info段的偏移
+- 然后走到 0x10d6d0, 取出 ImageLoader cache, 存入 x17
+- 把 lazy bind info offset 和 ImageLoaderCache 存入栈上。
+- 然后取出 dyld_stub_binder的地址，存入x16. 跳转 dyld_stub_binder
+- dyld_stub_binder 会根据传入的 lazy bind info的 offset来执行真正的bind. bind结束后，刚才看到的 `0x10d6e8` 这个地址就变成了 `NSClassFromString`。就完成了LazyBind的过程。
+
+`dyld_stub_binder`的实现有兴趣的同学可以自己看一看源码。
+
+### Weak Bind
+
+OC的代码貌似不会编译出`Weak Bind`. 目前遇到的`Weak Bind`都是C++的 `template` 的方法。特点就是：Weak bind的符号每加载进来二进制都会bind到最新的符号上。比如2个动态库里面都有同样的`weak bind`符号，那么所有的的符号引用都会bind到后加载进来的那个符号上。
+
+## 动态链接过程
+
+了解了 `rebase` 和 `bind` 是怎么回事之后，我们再来看整个动态链接过程。
+
+在前面文章里面提到了加载二进制的过程： instantiate -> addImage -> link -> runInitializers
+其中link就是动态链接的过程。
+
+link的代码如下：
+```c
+void ImageLoader::link(const LinkContext& context, bool forceLazysBound, bool preflightOnly, bool neverUnload, const RPathChain& loaderRPaths, const char* imagePath)
+{
+	//dyld::log("ImageLoader::link(%s) refCount=%d, neverUnload=%d\n", imagePath, fDlopenReferenceCount, fNeverUnload);
+	
+	// clear error strings
+	(*context.setErrorStrings)(0, NULL, NULL, NULL);
+
+	uint64_t t0 = mach_absolute_time();
+	this->recursiveLoadLibraries(context, preflightOnly, loaderRPaths, imagePath);
+	context.notifyBatch(dyld_image_state_dependents_mapped, preflightOnly);
+
+	// we only do the loading step for preflights
+	if ( preflightOnly )
+		return;
+		
+	uint64_t t1 = mach_absolute_time();
+	context.clearAllDepths();
+	this->recursiveUpdateDepth(context.imageCount());
+
+	uint64_t t2 = mach_absolute_time();
+ 	this->recursiveRebase(context);
+	context.notifyBatch(dyld_image_state_rebased, false);
+	
+	uint64_t t3 = mach_absolute_time();
+ 	this->recursiveBind(context, forceLazysBound, neverUnload);
+
+	uint64_t t4 = mach_absolute_time();
+	if ( !context.linkingMainExecutable )
+		this->weakBind(context);
+	uint64_t t5 = mach_absolute_time();	
+
+	context.notifyBatch(dyld_image_state_bound, false);
+	uint64_t t6 = mach_absolute_time();	
+
+	std::vector<DOFInfo> dofs;
+	this->recursiveGetDOFSections(context, dofs);
+	context.registerDOFs(dofs);
+	uint64_t t7 = mach_absolute_time();	
+
+	// interpose any dynamically loaded images
+	if ( !context.linkingMainExecutable && (fgInterposingTuples.size() != 0) ) {
+		this->recursiveApplyInterposing(context);
+	}
+	
+	// clear error strings
+	(*context.setErrorStrings)(0, NULL, NULL, NULL);
+
+	fgTotalLoadLibrariesTime += t1 - t0;
+	fgTotalRebaseTime += t3 - t2;
+	fgTotalBindTime += t4 - t3;
+	fgTotalWeakBindTime += t5 - t4;
+	fgTotalDOF += t7 - t6;
+	
+	// done with initial dylib loads
+	fgNextPIEDylibAddress = 0;
+}
+```
+
+- 第一步 recursiveLoadLibraries
+
+这一步就是根据 LoadCommand 中的 `LC_LOAD_DYLIB` 把依赖的动态库和Framework加载进来。也就是对这些动态库 `instantiate` 的过程。 只是动态库不会用`instantiateMainExecutable`方法来加载了，最终用的是 `instantiateFromFile` 来加载。
+
+- 第二步 recursiveUpdateDepth
+
+刷新depth, 就是库依赖的层级。层级越深，depth越大。
+
+- 第三步 recursiveRebase
+
+rebase的过程，`recursiveRebase`就会把主二进制和依赖进来的动态库全部rebase.
+
+- 第四步 recursiveBind
+
+主二进制和依赖进来的动态库全部执行 bind
+
+- 第五步 weakBind
+
+执行weakBind，这里看到如果是主二进制在link的话，是不会在这个时候执行`weak bind`的，在`dyld::_main`里面可以看到，是在link完成之后再执行的`weakBind`.
+
+```c
+uintptr_t
+_main(const macho_header* mainExecutableMH, uintptr_t mainExecutableSlide, 
+		int argc, const char* argv[], const char* envp[], const char* apple[], 
+		uintptr_t* startGlue)
+{
+    ..... 
+
+	gLinkContext.linkingMainExecutable = true;
+
+    // 执行link
+    link(sMainExecutable, sEnv.DYLD_BIND_AT_LAUNCH, true, ImageLoader::RPathChain(NULL, NULL), -1);
+    ......
+    gLinkContext.linkingMainExecutable = false;
+    
+    // <rdar://problem/12186933> do weak binding only after all inserted images linked
+    sMainExecutable->weakBind(gLinkContext);
+
+    ......
+}
+
+```
+
+- 第六步  registerDOFs
+
+注册DTrace Object Format。 什么是DTrace可以看这个： [DTrance](https://objccn.io/issue-19-4/)
+
+- 第七步  recursiveApplyInterposing
+
+主二进制link时候也不执行
+
+## 反向依赖
+
+以前在不完全了解动态链接的过程时，以为每个库之间的符号只能单向依赖，即 A.dylib 依赖 B.dylib。那么B中就不能依赖A中的符号。但是某一个我发现主工程依赖的一个动态库中竟然还可以继承来着主工程的类。于是又详细看了下动态链接的过程。原来库与库之间是可以相互依赖符号的。
+
+> 一次dyld加载进来的二进制之间可以相互依赖符号。
+
+原因很简单，就是因为上面看到静态链接过程中，并不是完全加载完一个被依赖的动态库，再加载下一个的。而是 recursiveLoadLibraies，recursiveRebase, recursiveBind。 所有的单步操作都会等待前一步所有的库完成。因此当 recursiveBind的时候，所有的动态库二进制已经加载进来了，符号就可以互相找了。
+
+一次dyld的过程只会一次动态link, 这次link的过程中的库符号可以互相依赖的，但是如果你通过`dlopen`, `-[NSBundle loadBundle]`的方式来延迟加载的动态库就不能反向依赖了，必须单向依赖，因为这是另外一次dyld的过程了。
+
+反向依赖还要有个条件，条件就是符号必须存在，如果因为编译优化把符号给strip了，那就没法bind了，还是会加载失败的。

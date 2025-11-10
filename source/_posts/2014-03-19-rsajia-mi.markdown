@@ -1,0 +1,221 @@
+---
+layout: post
+title: "RSA加密"
+date: 2014-03-19 00:12:47 +0800
+comments: true
+categories: 加密
+---
+
+RSA加密算法是现在世界上运用最广泛的非对称加密算法，比如常用的https协议、银行交易等等。因为最近要使用到RSA加密算法加密数据，因此做了一些研究。
+
+如果你还不知道什么是非对称加密算法，我可以简单概括一下，就是加密和解密使用不同的秘钥进行。详细了解：[公开秘钥加密](http://zh.wikipedia.org/zh-cn/%E5%85%AC%E5%BC%80%E5%AF%86%E9%92%A5%E5%8A%A0%E5%AF%86)
+
+<!-- more -->
+
+####1. 算法原理简介
+
+算法的历史和证明挺复杂的，在这里就不对欧拉定理详解了，直接给出公式。如果你想要理解通透，建议看这一篇博客，写的很好，我也是参考这个写的：
+
+[RSA算法原理（一）](http://www.ruanyifeng.com/blog/2013/06/rsa_algorithm_part_one.html)
+[RSA算法原理（二）](http://www.ruanyifeng.com/blog/2013/07/rsa_algorithm_part_two.html)
+
+#####1.1欧拉定理
+
+	如果两个正整数a和n互质，则n的欧拉函数 φ(n) 可以让下面的等式成立：
+<blockquote>
+<p>　　a<sup>φ(n)</sup> ≡ 1 (mod n)</p>
+</blockquote>
+
+这个公式的意思是a的φ(n)次方除以 n 余1，欧拉方程φ(n)表示{1,2,3...n}中与n互质关系的整数的个数。互质关系就是两个数除了1以外没有公约数。
+
+什么是互质关系呢？
+    
+    如果两个正整数，除了1以外，没有其他公因子，我们就称这两个数是互质关系（coprime）。
+    比如，15和32没有公因子，所以它们是互质关系。这说明，不是质数也可以构成互质关系。
+
+#####1.2模反元素
+
+如果两个正整数a和n互质，那么一定可以找到整数b，使得 ab-1 可以被 n 整除，或者说 ab 被 n 除的余数是 1。这时，b就叫做a的"模反元素"。
+
+<blockquote>
+<p>　　ab ≡ 1 (mod n)</p>
+</blockquote>
+
+#####1.3公钥加密和私钥解密
+
+公钥加密公式
+<blockquote>
+<p>　　m<sup>e</sup> ≡ c (mod n)</p>
+<p>也可以写为</p>
+<p>　　c = m<sup>e</sup> mod n</p>
+</blockquote>
+私钥解密公式
+<blockquote>
+<p>　　c<sup>d</sup> ≡ m (mod n)</p>
+<p>也可以写为</p>
+<p>　　m = c<sup>d</sup> mod n</p>
+</blockquote>
+
+看起来可能有些不明白，说明下这几个参数的含义，其中
+
+	m: 将加密的明文
+	c: 加密的密文
+	n: 模数，两个很大的质数的乘积
+	e: 公钥指数
+	d: 私钥指数
+	(n,e) 是公钥
+	(n,d) 是私钥
+	d是e对于φ(n)的模反元素
+
+然后再说这几个参数是怎么得出的：
+
+> 1、选取两个质数p和q, p和q的乘积就是模n. 因此p和q要尽量大
+> 
+> 2、根据质数`φ(p)=p-1`和欧拉方程满足乘法结合率的规律求出`φ(n)`,即`φ(n)=(p-1)(q-1)`
+
+> 3、选取质数e作为公钥指数, e的范围`1<e<φ(n)`,且 e 与 φ(n) 互质, 一般证书中都选取65537
+
+> 4、求出e对`φ(n)`的模反元素d，求解公式：`ed ≡ 1 (mod φ(n))`即可得出
+
+由上可见，在只有公钥(n,e)的情况下，如果要得到私钥指数d，必须求出φ(n)，而其中φ(n)的求解方法是首先对n因式分解为q x p(q和p都为质数),然后`φ(n)=(p-1)(q-1)`
+
+但是对一个很大的数n进行因式分解是很困难的，目前被破解的最长的位数是768位，而且耗时多个月。如果不能对n因式分解，就不能通过e求出d，因此私钥不能导出，加密方法安全性很高。
+
+***由加密和节目公式可以看出加密解密过程是类似的，如果把c当做明文，m当做密文，即可实现使用私钥进行加密，公钥进行解密***
+
+####2. 公钥示例
+
+我们常说RSA的公钥1024位，2048位，是指其模数的长度，即n的长度。由于768位的秘钥已经被破解，1024位的安全受到威胁，但是一般的加密来说是够用的。
+
+https中的ssl3.0和TSL1.0等也都使用了RSA来加密密钥。我截取了github.com的证书可以看到github的公钥信息：
+
+![github](/images/rsa_github.png)
+
+其中256字节的就是模数n, 这是16进制HEX的写法，一字节8位，一共就是2024位。
+其中65537就是密钥指数，大部分的公钥指数都会选择65537
+
+####3. RSA加密中的Padding
+
+padding即是填充方式,先说下为什么会有padding，由于RSA的算法原理中, 需要被加密的明文c是要比模数小的。padding就是通过一些填充方式保证明文c的位数，且不能使c大于n.
+
+因此模的长度也觉得可以加密明文的长度，因此RSA不适合加密大段文本，一般用来加密一个对称加密的密钥，然后再用此对称加密密钥对大段文本加密。
+
+RSA加密常用的填充方式有下面3种：
+
+#####4.1.RSA_PKCS1_PADDING 填充模式，最常用的模式
+
+要求:
+输入：必须 比 RSA 钥模长(modulus) 短至少11个字节, 也就是　RSA_size(rsa) – 11
+如果输入的明文过长，必须切割，　然后填充
+
+输出：和modulus一样长
+
+根据这个要求，对于1024bit的密钥，　block length = 1024/8 – 11 = 117 字节
+
+#####4.2.RSA_PKCS1_OAEP_PADDING
+输入：RSA_size(rsa) – 41
+
+输出：和modulus一样长
+
+#####4.3.for RSA_NO_PADDING　　不填充
+
+输入：可以和RSA钥模长一样长，如果输入的明文过长，必须切割，　然后填充
+
+输出：和modulus一样长
+
+
+####4. IOS中的RSA
+
+在ios中可以使用<sercurity.framework>可实现些RSA的加密解密.
+
+``` c
+	//生成公钥和私钥的方法
+	OSStatus SecKeyGeneratePair(CFDictionaryRef parameters, SecKeyRef *publicKey,
+    SecKeyRef *privateKey) __OSX_AVAILABLE_STARTING(__MAC_10_7, __IPHONE_2_0);
+    
+    //加密方法
+    OSStatus SecKeyEncrypt(
+    SecKeyRef           key,
+	SecPadding          padding,
+	const uint8_t		*plainText,
+	size_t              plainTextLen,
+	uint8_t             *cipherText,
+	size_t              *cipherTextLen)
+    __OSX_AVAILABLE_STARTING(__MAC_10_7, __IPHONE_2_0);
+    
+    //解密方法
+    OSStatus SecKeyEncrypt(
+    SecKeyRef           key,
+	SecPadding          padding,
+	const uint8_t		*plainText,
+	size_t              plainTextLen,
+	uint8_t             *cipherText,
+	size_t              *cipherTextLen)
+    __OSX_AVAILABLE_STARTING(__MAC_10_7, __IPHONE_2_0);
+```   
+但是这个framework的api只支持从标准证书文件(cer, crt)中读取公钥。有时java后台给我们的公钥只是一个pem格式的公钥文件，其中保存的公钥信息是base64加密的字符串，这个用sercurity就不能读取了啊。下面是pem内容示例：
+
+如：
+
+	-----BEGIN PUBLIC KEY-----
+	MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQCSh6+KnrtF37KHrGbWnf
+	r9qlOsdtxER3CezagsRHbdBD9CLo3aCbRQMjG9f11Dyp0USB7eX0tc/naB
+	vX4qXuKjeu8oPwnqyARRmUkiBHLwCRolSYJgzmSM6wpvd5R95uA/SfPTQg
+	WulHV6b0c5AAT6Ei8klHGtUHOXgXsnLihGWwIDAQAB
+	-----END PUBLIC KEY-----
+这种使用sercurity.framework就不行了。但是我们可以使用openssl的api来实现此类的加解密：
+
+格式化公钥，并写入文件
+
+``` objc
+	NSMutableString *result = [NSMutableString string];
+	[result appendString:@"-----BEGIN PUBLIC KEY-----\n"];
+	int count = 0;
+	for (int i = 0; i < [publicKey length]; ++i) {
+		
+		unichar c = [publicKey characterAtIndex:i];
+		if (c == '\n' || c == '\r') {
+			continue;
+		}
+		[result appendFormat:@"%c", c];
+		if (++count == 64) {
+			[result appendString:@"\n"];
+			count = 0;
+		}
+	}
+	[result appendString:@"\n-----END PUBLIC KEY-----"];
+    [result writeToFile:OpenSSLRSAPublicKeyFile
+                    atomically:YES
+                      encoding:NSASCIIStringEncoding
+                         error:NULL];
+```                        
+从文件中读取RSA对象，
+
+``` objc
+	FILE *publicKeyFile;
+    const char *publicKeyFileName = [OpenSSLRSAPublicKeyFile cStringUsingEncoding:NSASCIIStringEncoding];
+    publicKeyFile = fopen([OpenSSLRSAPublicKeyFile cStringUsingEncoding:NSASCIIStringEncoding],"rb");
+    if (NULL != publicKeyFile)
+    {
+        BIO *bpubkey = NULL;
+        bpubkey = BIO_new(BIO_s_file());
+        BIO_read_filename(bpubkey, publicKeyFileName);
+        
+        _rsa = PEM_read_bio_RSA_PUBKEY(bpubkey, NULL, NULL, NULL);
+        assert(_rsa != NULL);
+        BIO_free_all(bpubkey);
+    }
+```
+    
+后面可以使用对其加密：
+
+``` c
+	int	RSA_public_encrypt(int flen, const unsigned char *from,
+		unsigned char *to, RSA *rsa,int padding);
+```
+#### 5. 使用OpenSSL加解密的demo
+
+[BBRSACryptor](https://github.com/NianJi/BBRSACryptor)                        
+
+
+	

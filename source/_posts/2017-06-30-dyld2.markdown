@@ -1,0 +1,247 @@
+---
+layout: post
+title: "dyld系列之一：_dyld_start之前"
+date: 2017-06-30 12:02:35 +0800
+comments: true
+categories: dyld
+---
+
+
+
+dyld是一个精细而又复杂的过程，在上一篇文章之后，有必要再详细剖析这个过程。这里讲到第一篇：dyld_start之前都经历了什么. 
+
+既然各种二进制都是走`dyld`加载的，那么`dyld`自身是如何加载进来的呢？`_dyld_start`之前系统都做了什么？
+
+<!-- more -->
+
+## 0x1 dyld源码分析
+
+当我们打个断点到`_objc_init`里面的时候，发现一切都是从一个叫 `_dyld_start` 的方法开始的。 拉到 `dyld` 的源码，发现是个汇编方法。而且没有搜到代码调用。 既然`dyld`是加载二进制的库，那么`_dyld_start`又是谁调用的呢？
+
+于是我先打个断点到`_dyld_start`, 发现并不能断。既然上层代码无法进一步分析，那就从内核里面找找答案吧！于是从苹果开源代码平台上down下来内核代码：[xnu](https://opensource.apple.com/tarballs/xnu/). 开始分析。
+
+先直接搜一下 `_dyld_start`。 发现没有直接调用这个方法的地方。于是找到dyld的二进制，用`hopper`或`machoview`分析一下。 可以在`deviceSupport`下面找到dyld. 如图:
+
+![1](/images/dyld2/1.png)
+
+在`hopper`中找到`_dyld_start`如图：
+
+![2](/images/dyld2/2.png)
+
+从这个图中可以看到，`_dyld_start`的地址是 0x1000, 在0x88 和 0x6d8 这两个地址有引用。我们再分别看下这2处是什么：
+
+其中 0x88 是记录了 section0的起始地址，这里就补贴图了。直接贴 0x6d8的内容：
+
+![3](/images/dyld2/3.png)
+
+可以看到这个是记录在执行`LC_UNIXTHREAD` 推测是在执行这个LoadCommand的时候可能会调用到 `_dyld_start`。
+
+`dyld`源码分析到这一步，后续在`dyld`上就不能更进一步挖掘了。带着上面的结果，我们可以到内核再挖掘一番。
+
+## 0x2 内核挖掘 `_dyld_start`是怎么被调用到的
+
+那就再往下层挖掘，往内核挖掘吧。 你可以很简单的在 opensource.apple.com 下载内核代码： [xnu](https://opensource.apple.com/tarballs/xnu/)  当然这个应该不是最新的代码，而且里面看起来只开放了i386相关的内核。但是对于我们分析dyld来说，应该是够用了。
+
+先上结论，不喜推理同学跳过：
+
+> `_dyld_start`的方法地址的确是在 `LC_UNIXTHREAD` 段中解析出来的。后续通过`thread_setentrypoint` 直接将用户态的pc设置到这个地址来执行的。
+
+探索过程开始：
+
+第一步，搜索一下 `LC_UNIXTHREAD`. 找到如下代码：
+```c
+case LC_UNIXTHREAD:
+    if (pass != 1)
+        break;
+    ret = load_unixthread(
+                (struct thread_command *) lcp,
+                thread,
+                slide,
+                result);
+    break;
+```
+再看 `load_unixthread` 方法, 并且在这个方法里面找到了解析entry_point的地方：
+
+```c
+// thread command的结构如下：
+struct thread_command {
+	uint32_t	cmd;		/* LC_THREAD or  LC_UNIXTHREAD */
+	uint32_t	cmdsize;	/* total size of this command */
+	/* uint32_t flavor		   flavor of thread state */
+	/* uint32_t count		   count of longs in thread state */
+	/* struct XXX_thread_state state   thread state for this flavor */
+	/* ... */
+};
+
+// 下面的代码会从thread command中解析出 entry point
+ret = load_threadentry(thread,
+		       (uint32_t *)(((vm_offset_t)tcp) + 
+		       		sizeof(struct thread_command)),
+		       tcp->cmdsize - sizeof(struct thread_command),
+		       &addr);
+	if (ret != LOAD_SUCCESS)
+		return(ret);
+
+	if (result->using_lcmain || result->entry_point != MACH_VM_MIN_ADDRESS) {
+		/* Already processed LC_MAIN or LC_UNIXTHREAD */
+		return (LOAD_FAILURE);
+	}
+
+	result->entry_point = addr;
+	result->entry_point += slide;
+```
+
+这个 `entry_point` 就是`_dyld_start`的地址，为什么？ 让我们进一步往`load_threadentry`里看，这个方法不长，我就全贴了, 直接在注释里面看：
+
+```c
+static
+load_return_t
+load_threadentry(
+	thread_t	thread,
+	uint32_t	*ts,   // ts 参数就是上段代码里面thread_command的 flavor的位置
+	uint32_t	total_size,  // total size就是thread command减去头部的2个uint32的大小
+	mach_vm_offset_t	*entry_point
+)
+{
+	kern_return_t	ret;
+	uint32_t	size;
+	int		flavor;
+	uint32_t	entry_size;
+
+	/*
+	 *	Set the thread state.
+	 */
+	*entry_point = MACH_VM_MIN_ADDRESS;
+	while (total_size > 0) {
+		flavor = *ts++;
+		size = *ts++;
+		if (UINT32_MAX-2 < size ||
+		    UINT32_MAX/sizeof(uint32_t) < size+2)
+			return (LOAD_BADMACHO);
+		entry_size = (size+2)*sizeof(uint32_t);
+		if (entry_size > total_size)
+			return(LOAD_BADMACHO);
+		total_size -= entry_size;
+		/*
+		 这一步取出 entry_point, 往下看thread_entrypoint方法
+		 */
+		ret = thread_entrypoint(thread, flavor, (thread_state_t)ts, size, entry_point);
+		if (ret != KERN_SUCCESS) {
+			return(LOAD_FAILURE);
+		}
+		ts += size;	/* ts is a (uint32_t *) */
+	}
+	return(LOAD_SUCCESS);
+}
+
+// 下面是取thread entry的方法，里面只有i386和x86架构的，没有arm的，但是原理是一样的。
+// 原理竟然就是 thread_commnd结构下面一坨数据就是寄存器的值！！！.
+// 比如下面， x86_THREAD_STATE64时就是取的 state25的rip.
+kern_return_t
+thread_entrypoint(
+    __unused thread_t   thread,
+    int                 flavor,
+    thread_state_t      tstate,
+    __unused unsigned int        count,
+    mach_vm_offset_t    *entry_point
+)
+{ 
+	/*
+	 * Set a default.
+	 */
+	if (*entry_point == 0)
+		*entry_point = VM_MIN_ADDRESS;
+
+	switch (flavor) {
+	case x86_THREAD_STATE32:
+		{
+			x86_thread_state32_t *state25;
+
+			state25 = (i386_thread_state_t *) tstate;
+			*entry_point = state25->eip ? state25->eip: VM_MIN_ADDRESS;
+			break;
+		}
+
+	case x86_THREAD_STATE64:
+		{
+			x86_thread_state64_t *state25;
+
+			state25 = (x86_thread_state64_t *) tstate;
+			*entry_point = state25->rip ? state25->rip: VM_MIN_ADDRESS64;
+			break;
+		}
+	}
+	return (KERN_SUCCESS);
+}
+```
+
+经过上面的源码分析，我们再看下上一节中看到的图，就可以这么解析了：
+
+![4](/images/dyld2/4.png)
+
+之所以这样推测，参考了libcxxabi中的这个结构体：
+```c
+struct GPRs {
+    uint64_t __x[29]; // x0-x28
+    uint64_t __fp;    // Frame pointer x29
+    uint64_t __lr;    // Link register x30
+    uint64_t __sp;    // Stack pointer x31
+    uint64_t __pc;    // Program counter
+    uint64_t padding; // 16-byte align
+  };
+```
+
+到了这一步，已经取到了`entry_point`. 那什么时候被调用呢？直接搜索一下`entry_point`. 发现在`activate_exec_state` 方法里面执行`thread_setentrypoint` 来设置`entry_point`. 如下：
+
+```c
+thread_setentrypoint(thread, result->entry_point);
+
+/*
+ * thread_setentrypoint:
+ *
+ * Sets the user PC into the machine
+ * dependent thread state info.
+ * 上面是原文注释，可以看到这一步做的事情就是直接把entry_point地址写入到用户态的寄存器里面了。这一步开始，_dyld_start就真正开始执行了。
+ */
+void
+thread_setentrypoint(thread_t thread, mach_vm_address_t entry)
+{
+	pal_register_cache_state(thread, DIRTY);
+	if (thread_is_64bit(thread)) {
+		x86_saved_state64_t	*iss64;
+
+		iss64 = USER_REGS64(thread);
+
+		iss64->isf.rip = (uint64_t)entry;
+	} else {
+		x86_saved_state32_t	*iss32;
+
+		iss32 = USER_REGS32(thread);
+
+		iss32->eip = CAST_DOWN_EXPLICIT(unsigned int, entry);
+	}
+}
+```
+
+## 0x3 串起来： _dyld_start 是如何一步步执行到的？
+
+上面一节的代码里面找到了`_dyld_start`是如何被调用的，但是整个代码的执行顺序是怎么样的呢？主二进制是什么时候解析的，dyld是什么时候加载的呢？
+
+这里就不再贴大段代码了，分析方法也很简单，就是在内核源码里面直接看。下面直接通过一个调用栈图来说明， 这里面每个方法都做了很多事情，我这里只注释了在走到`_dyld_start`路上的关键事情，很简略。
+
+```c
+▼ execve       // 用户点击了app, 用户态会发送一个系统调用 execve 到内核
+  ▼ __mac_execve  // 创建线程
+    ▼ exec_activate_image // 在 encapsulated_binary 这一步会根据image的类型选择imgact的方法
+      ▼ exec_mach_imgact
+        ▼ load_machfile
+          ▶︎ parse_machfile  //解析主二进制macho
+          ▼ load_dylinker // 解析完 macho后，根据macho中的 LC_LOAD_DYLINKER 这个LoadCommand来启动这个二进制的加载器，即 /usr/bin/dyld
+            ▼ parse_machfile // 解析 dyld 这个mach-o文件，这个过程中会解析出entry_point
+        ▼ activate_exec_state  
+          ▶︎ thread_setentrypoint // 设置entry_point。
+```
+
+## 0x4 小结
+
+本文简单探究了一下内核如何启动一个app的。也就是在 `_dyld_start`之前系统怎么加载的。如有错误，欢迎指正。
