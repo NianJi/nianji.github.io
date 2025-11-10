@@ -174,9 +174,9 @@ comments:
 giscus:
   enable: true
   repo: NianJi/nianji.github.io
-  repo_id: # 需要在 https://giscus.app 获取
+  repo_id: R_kgDOMTpLGQ # 需要在 https://giscus.app 获取
   category: Announcements
-  category_id: # 需要在 https://giscus.app 获取
+  category_id: DIC_kwDOMTpLGc4CxoOD # 需要在 https://giscus.app 获取
   # 可选值：pathname | url | title | og:title
   mapping: pathname
   # 可选值：1 | 0
